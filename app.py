@@ -18,12 +18,12 @@ section.main {
     background: white !important;
 }
 .stButton>button {
-    background-color: #2d8f2d !important;
+    background-color: white !important;
     color: black !important;
     font-weight: 700;
 }
 .stButton>button:hover {
-    background-color: #239123 !important;
+    background-color: #f0f0f0 !important;
 }
 .ea-table {
     border-collapse: collapse;
@@ -84,6 +84,16 @@ section.main {
 .ea-map-l3 a:hover {
     text-decoration: underline;
 }
+div:has(> .render-btns-start) + [data-testid="stHorizontalBlock"] .stButton > button {
+    background-color: #d4d4d4 !important;
+    color: #333 !important;
+    font-size: 1.5rem !important;
+    font-weight: 600 !important;
+    padding: 0.6rem 1.4rem !important;
+}
+div:has(> .render-btns-start) + [data-testid="stHorizontalBlock"] .stButton > button:hover {
+    background-color: #bdbdbd !important;
+}
 </style>
 """
 
@@ -98,37 +108,35 @@ if "df" not in st.session_state:
     st.session_state.df = pd.DataFrame(columns=["A", "B", "C", "D"])
     st.session_state.sort_desc = True
     st.session_state.show_map = False
+    st.session_state.map_level = "L3"  # "L2" or "L3"
+
+SKIP_L1 = {"Database and Data Mngt.", "App. Platf. and Infrastr.", "IT Management"}
 
 
 def load_csv(csv_file):
-    # Common encodings to try for Danish/European CSV files
     encodings = ['utf-8', 'cp1252', 'iso-8859-1', 'latin-1', 'utf-8-sig']
-    
+
     for encoding in encodings:
         try:
             df = pd.read_csv(csv_file, sep=";", header=0, dtype=str, keep_default_na=False, encoding=encoding)
-            # Check if the dataframe is empty or has no columns
             if df.empty or len(df.columns) == 0:
                 continue
             return _process_df(df)
         except (UnicodeDecodeError, pd.errors.EmptyDataError):
             continue
-        except Exception as exc:
-            # For other errors, try next encoding
+        except Exception:
             continue
-    
-    # If all encodings failed, show error
+
     st.error("Could not read CSV file. Please ensure the file is a valid semicolon-delimited CSV file with proper encoding (UTF-8, Windows-1252, or ISO-8859-1).")
     return None
 
+
 def _process_df(df):
-    # Disregard first 3 rows
     df = df.iloc[3:]
-    # Disregard column 5 and above, only first 4 columns
     df = df.iloc[:, :4]
-    df.columns = ["A", "B", "C", "D"]  # A=L1, B=L2, C=Row3, D=L3
+    df.columns = ["A", "B", "C", "D"]
     df = df.fillna("")
-    df = df.head(400)  # Limit to 400 lines
+    df = df.head(400)
     return df
 
 
@@ -137,8 +145,7 @@ def render_table(df: pd.DataFrame):
         st.info("No capability rows available yet.")
         return
 
-    # Filter out blank lines (rows where all A,B,C,D are empty or whitespace)
-    df = df[df[['A','B','C','D']].apply(lambda x: x.str.strip().ne('').any(), axis=1)]
+    df = df[df[['A', 'B', 'C', 'D']].apply(lambda x: x.str.strip().ne('').any(), axis=1)]
 
     if df.empty:
         st.info("No capability rows with content available.")
@@ -148,7 +155,8 @@ def render_table(df: pd.DataFrame):
     st.markdown(html, unsafe_allow_html=True)
 
 
-def render_hierarchy(df: pd.DataFrame):
+def render_hierarchy_l3(df: pd.DataFrame):
+    """Full L1 → L2 → L3 hierarchy (original behaviour)."""
     if df.empty:
         st.info("Upload or add rows before rendering the capability map.")
         return
@@ -157,12 +165,13 @@ def render_hierarchy(df: pd.DataFrame):
     sort_order = [False, False, False] if st.session_state.sort_desc else [True, True, True]
     df = df.sort_values(by=["A", "B", "C"], ascending=sort_order, ignore_index=True)
 
-    unique_a = df["A"].dropna().map(str).replace("", "(empty)").unique().tolist()
+    unique_a = [a for a in df["A"].dropna().map(str).replace("", "(empty)").unique().tolist()
+                if a not in SKIP_L1]
     if not unique_a:
         st.info("No L1 values to render.")
         return
 
-    st.markdown("## Capability Map")
+    st.markdown("## Capability Map (L3)")
     st.markdown("<div style='background:white; padding: 20px; border-radius: 18px; box-shadow: 0 0 18px rgba(0,0,0,0.06);'>", unsafe_allow_html=True)
 
     columns_per_row = len(unique_a)
@@ -195,11 +204,61 @@ def render_hierarchy(df: pd.DataFrame):
     st.markdown("</div>", unsafe_allow_html=True)
 
 
+def render_hierarchy_l2(df: pd.DataFrame):
+    """L1 → L2 only hierarchy (no L3 shown)."""
+    if df.empty:
+        st.info("Upload or add rows before rendering the capability map.")
+        return
+
+    df = df.copy()
+    sort_order = [False, False] if st.session_state.sort_desc else [True, True]
+    df = df.sort_values(by=["A", "B"], ascending=sort_order, ignore_index=True)
+
+    unique_a = [a for a in df["A"].dropna().map(str).replace("", "(empty)").unique().tolist()
+                if a not in SKIP_L1]
+    if not unique_a:
+        st.info("No L1 values to render.")
+        return
+
+    st.markdown("## Capability Map (L2)")
+    st.markdown("<div style='background:white; padding: 20px; border-radius: 18px; box-shadow: 0 0 18px rgba(0,0,0,0.06);'>", unsafe_allow_html=True)
+
+    columns_per_row = len(unique_a)
+    for row_start in range(0, len(unique_a), columns_per_row):
+        row_slice = unique_a[row_start:row_start + columns_per_row]
+        cols = st.columns(len(row_slice), gap="large")
+        for col, a_value in zip(cols, row_slice):
+            with col:
+                st.markdown(f"<div class='ea-map-l1'>{a_value}</div>", unsafe_allow_html=True)
+                sub_a = df[df["A"] == a_value]
+                if sub_a.empty:
+                    continue
+
+                # Collect unique L2 values for this L1
+                seen_b = []
+                for b_value in sub_a["B"].tolist():
+                    b_str = str(b_value).strip() or "(no L2)"
+                    if b_str not in seen_b:
+                        seen_b.append(b_str)
+
+                for b_str in seen_b:
+                    st.markdown(f"<div class='ea-map-l2'>{b_str}</div>", unsafe_allow_html=True)
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+# ── Main routing ──────────────────────────────────────────────────────────────
+
 if st.session_state.show_map:
-    render_hierarchy(st.session_state.df)
+    if st.session_state.map_level == "L2":
+        render_hierarchy_l2(st.session_state.df)
+    else:
+        render_hierarchy_l3(st.session_state.df)
+
     if st.button("Back to Editor"):
         st.session_state.show_map = False
         st.rerun()
+
 else:
     uploaded_file = st.file_uploader("Upload CSV file (semicolon-delimited)", type=["csv"])
     if uploaded_file is not None:
@@ -217,9 +276,19 @@ else:
     )
     st.session_state.sort_desc = sort_choice.startswith("Descending")
 
-    if st.button("Render capability map"):
-        st.session_state.show_map = True
-        st.rerun()
+    # ── Two render buttons side by side ──────────────────────────────────────
+    st.markdown('<div class="render-btns-start" style="display:none"></div>', unsafe_allow_html=True)
+    btn_col1, btn_col2, _ = st.columns([2, 2, 6])
+    with btn_col1:
+        if st.button("Render capability map L2"):
+            st.session_state.map_level = "L2"
+            st.session_state.show_map = True
+            st.rerun()
+    with btn_col2:
+        if st.button("Render capability map L3"):
+            st.session_state.map_level = "L3"
+            st.session_state.show_map = True
+            st.rerun()
 
     st.subheader("Capability list")
     render_table(
